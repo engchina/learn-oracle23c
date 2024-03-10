@@ -1,8 +1,11 @@
 import time
 from typing import Union
 
-from fastapi import FastAPI, Request, BackgroundTasks, WebSocket, Depends
+import databases
+import sqlalchemy
+from fastapi import FastAPI, Request, Response, BackgroundTasks, WebSocket, Depends
 from pydantic import BaseModel
+from starlette.responses import JSONResponse
 from starlette.staticfiles import StaticFiles
 
 app = FastAPI()
@@ -112,6 +115,91 @@ FastAPI 可以很容易地为静态文件(如 CSS、JavaScript 和图片文件)�
 例如,如果我们有一个 static/css/styles.css 文件,就可以通过 /static/css/styles.css 路径访问它。
 """
 app.mount("/static", StaticFiles(directory="static"), name="static")
+
+"""
+事件处理程序 (Event Handlers)
+事件处理程序允许你在应用程序的生命周期中执行某些操作,例如在启动时加载配置或连接数据库,在关闭时释放资源。
+"""
+
+
+@app.on_event("startup")
+async def startup_event():
+    # 执行启动时的初始化操作
+    print("INFO:     Executing startup initialization")
+    # Perform startup initialization
+    pass
+
+
+@app.on_event("shutdown")
+def shutdown_event():
+    # 执行关闭时的清理操作
+    # pass
+    # Perform cleanup operations on shutdown
+    print("INFO:     Running cleanup operations on shutdown")
+
+
+"""
+自定义响应 (Custom Responses)
+FastAPI允许你自定义响应的内容、状态码和响应头。你可以使用内置的响应类,如JSONResponse或PlainTextResponse,也可以直接操作Response对象。
+"""
+
+
+@app.get("/custom-response")
+def custom_response():
+    data = {"message": "This is a custom response"}
+    return JSONResponse(content=data, headers={"X-Custom-Header": "Value"})
+
+
+@app.get("/plain-text-response")
+def plain_text_response(response: Response):
+    response.headers["Content-Type"] = "text/plain"
+    response.data = b"This is a plain text response"
+    return response
+
+
+"""
+数据库集成 (Database Integration)
+这个示例展示了如何使用databases和sqlalchemy库将FastAPI集成到SQLite数据库。
+它定义了一个users表,并提供了一个get_user依赖函数来从数据库中获取用户数据。
+startup和shutdown事件处理程序用于连接和断开数据库连接。
+"""
+
+database = databases.Database("sqlite:///example.db")
+metadata = sqlalchemy.MetaData()
+
+users = sqlalchemy.Table(
+    "users",
+    metadata,
+    sqlalchemy.Column("id", sqlalchemy.Integer, primary_key=True),
+    sqlalchemy.Column("name", sqlalchemy.String),
+    sqlalchemy.Column("email", sqlalchemy.String),
+)
+
+engine = sqlalchemy.create_engine("sqlite:///example.db")
+metadata.create_all(engine)
+
+
+@app.on_event("startup")
+async def startup_database():
+    await database.connect()
+
+
+@app.on_event("shutdown")
+async def shutdown_database():
+    await database.disconnect()
+
+
+async def get_user(user_id: int):
+    query = users.select().where(users.c.id == user_id)
+    user = await database.fetch_one(query)
+    return user
+
+
+@app.get("/users/{user_id}")
+async def read_user(user_id: int, user=Depends(get_user)):
+    if user is None:
+        return {"message": "User not found"}
+    return {"id": user.id, "name": user.name, "email": user.email}
 
 
 @app.get("/")
